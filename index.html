@@ -414,6 +414,7 @@
             const data = localStorage.getItem('tasks');
             allTasks = data ? JSON.parse(data) : [];
             renderTasks(allTasks);
+            updateCalendarView();
         }
 
         // --- SOP 說明邏輯 ---
@@ -667,32 +668,74 @@
             localStorage.setItem('tasks', JSON.stringify(tasks));
         }
 
+        // 產生日期區間內的重複實例
+        function getInstancesInRange(tasks, startStr, endStr) {
+            const instances = [];
+            const start = new Date(startStr);
+            const end = new Date(endStr);
+
+            tasks.forEach(task => {
+                let curr = new Date(startStr);
+                const endD = new Date(endStr);
+                while (curr <= endD) {
+                    const dateStr = curr.toISOString().split('T')[0];
+                    let isMatch = false;
+
+                    if (task.recurrence_type === 'once') {
+                        if (task.date === dateStr) isMatch = true;
+                    } else if (task.recurrence_type === 'daily') {
+                        isMatch = true;
+                    } else if (task.recurrence_type === 'weekly') {
+                        const taskDay = new Date(task.date || dateStr).getDay();
+                        if (curr.getDay() === taskDay) isMatch = true;
+                    } else if (task.recurrence_type === 'monthly') {
+                        const taskDate = new Date(task.date || dateStr).getDate();
+                        if (curr.getDate() === taskDate) isMatch = true;
+                    }
+
+                    if (isMatch) {
+                        const override = (task.overrides && task.overrides[dateStr]) ? task.overrides[dateStr] : {};
+                        if (!override.deleted) {
+                            instances.push({
+                                ...task,
+                                instanceDate: dateStr,
+                                completed: override.completed !== undefined ? override.completed : task.completed,
+                                notes: override.notes || task.notes,
+                                images: override.images || task.images
+                            });
+                        }
+                    }
+                    curr.setDate(curr.getDate() + 1);
+                }
+            });
+            return instances;
+        }
+
         function renderTasks(tasks) {
             const query = document.getElementById('taskSearch')?.value.toLowerCase() || '';
-            const startDate = document.getElementById('startDate')?.value || '';
-            const endDate = document.getElementById('endDate')?.value || '';
-            const keywords = query.split(/\s+/).filter(k => k.trim()); // 拆分多個關鍵字
-
-            const filtered = tasks.filter(t => {
-                const combinedText = (t.topic + ' ' + (t.content || '') + ' ' + (t.notes || '')).toLowerCase();
-                const matchesKeywords = keywords.every(kw => combinedText.includes(kw));
-                
-                let matchesDate = true;
-                if (startDate && t.date && t.date < startDate) matchesDate = false;
-                if (endDate && t.date && t.date > endDate) matchesDate = false;
-                
-                return matchesKeywords && matchesDate;
-            });
+            const startInput = document.getElementById('startDate')?.value;
+            const endInput = document.getElementById('endDate')?.value;
             
-            // 先排序
+            const todayStr = new Date().toISOString().split('T')[0];
+            const rangeStart = startInput || todayStr;
+            const rangeEnd = endInput || rangeStart;
+
+            const instances = getInstancesInRange(tasks, rangeStart, rangeEnd);
+            const keywords = query.split(/\s+/).filter(k => k.trim());
+
+            const filtered = instances.filter(t => {
+                const combinedText = (t.topic + ' ' + (t.content || '') + ' ' + (t.notes || '')).toLowerCase();
+                return keywords.every(kw => combinedText.includes(kw));
+            });
+
             const sortedTasks = filtered.sort((a, b) => {
                 // 1. 比較完成狀態：未完成的排在前面 (false < true)
                 if (a.completed !== b.completed) {
                     return a.completed ? 1 : -1;
                 }
                 // 2. 比較日期：依日期先後順序排序
-                const dateA = a.date || '';
-                const dateB = b.date || '';
+                const dateA = a.instanceDate || '';
+                const dateB = b.instanceDate || '';
                 if (dateA !== dateB) return dateA.localeCompare(dateB);
                 // 3. 比較時間：同一天則依時間早晚排序
                 return a.time.localeCompare(b.time);
@@ -957,6 +1000,7 @@
         async function deleteTask(id, date) {
             if (!confirm('確定要刪除嗎?')) return;
             const index = allTasks.findIndex(t => t.id === id);
+            if (index === -1) return;
             
             if (allTasks[index].recurrence_type === 'once') {
                 allTasks = allTasks.filter(t => t.id !== id);
