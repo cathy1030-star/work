@@ -187,7 +187,7 @@
                     <div class="col-12">
                         <div class="input-group shadow-sm">
                             <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-muted"></i></span>
-                            <input type="text" id="taskSearch" class="form-control border-start-0 border-end-0" placeholder="搜尋關鍵字 (如: 喝水 提醒)..." oninput="currentPage=1; renderTasks(allTasks)">
+                            <input type="text" id="taskSearch" class="form-control border-start-0 border-end-0" placeholder="搜尋關鍵字 (如: 喝水 提醒)..." oninput="currentPage=1; renderTasks(allTasks); updateCalendarView();">
                             <button class="btn btn-outline-secondary border-start-0 bg-white text-muted" type="button" onclick="clearSearch('taskSearch', () => renderTasks(allTasks))">
                                 <i class="bi bi-x-circle"></i>
                             </button>
@@ -380,14 +380,15 @@
                     right: 'dayGridMonth,timeGridWeek'
                 },
                 eventClick: function(info) {
-                    prepareEdit(parseInt(info.event.id));
+                    prepareEdit(info.event.extendedProps.originalId);
                 }
             });
             calendar.render();
             
             // 當切換到月曆分頁時，必須強制重新計算尺寸與渲染，否則在隱藏狀態下初始化的日曆會無法顯示
-            document.getElementById('calendar-tab').addEventListener('shown.bs.tab', () => {
+            document.getElementById('calendar-tab').addEventListener('shown.bs.tab', (e) => {
                 calendar.updateSize();
+                updateCalendarView();
                 calendar.render();
             });
 
@@ -524,25 +525,31 @@
         }
 
         // --- 任務備註詳情邏輯 ---
-        function openTaskNote(id) {
+        function openTaskNote(id, date) {
             const task = allTasks.find(t => t.id === id);
             if (!task) return;
-
-            document.getElementById('editTaskNoteId').value = task.id;
-            document.getElementById('taskNoteTextarea').value = task.notes || '';
-            currentModalImages = task.images || [];
+            
+            const override = (task.overrides && task.overrides[date]) ? task.overrides[date] : {};
+            document.getElementById('editTaskNoteId').value = `${task.id}|${date}`;
+            document.getElementById('taskNoteTextarea').value = override.notes || task.notes || '';
+            currentModalImages = override.images || task.images || [];
             renderImagePreviews(currentModalImages, 'taskNoteImgPreview');
             taskNoteModal.show();
         }
 
         function updateTaskNote() {
-            const id = parseInt(document.getElementById('editTaskNoteId').value);
+            const compositeId = document.getElementById('editTaskNoteId').value;
+            const [id, date] = compositeId.split('|');
             const notes = document.getElementById('taskNoteTextarea').value;
 
-            const index = allTasks.findIndex(t => t.id === id);
+            const index = allTasks.findIndex(t => t.id == id);
             if (index !== -1) {
-                allTasks[index].notes = notes;
-                allTasks[index].images = currentModalImages;
+                if (!allTasks[index].overrides) allTasks[index].overrides = {};
+                if (!allTasks[index].overrides[date]) allTasks[index].overrides[date] = {};
+                
+                allTasks[index].overrides[date].notes = notes;
+                allTasks[index].overrides[date].images = [...currentModalImages];
+                
                 saveTasks(allTasks);
                 renderTasks(allTasks);
                 taskNoteModal.hide();
@@ -704,15 +711,11 @@
                 const now = new Date();
                 const today = now.toISOString().split('T')[0];
                 const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+                const targetDate = task.instanceDate;
 
                 let isOverdue = false;
                 if (!task.completed) {
-                    if (task.recurrence_type === 'once' && task.date) {
-                        if (task.date < today || (task.date === today && task.time < currentTime)) {
-                            isOverdue = true;
-                        }
-                    } else if (task.time < currentTime) {
-                        // 針對重複性任務，若當天時間已過則視為逾期
+                    if (targetDate < today || (targetDate === today && task.time < currentTime)) {
                         isOverdue = true;
                     }
                 }
@@ -725,7 +728,7 @@
                 div.className = `list-group-item list-group-item-action d-flex justify-content-between align-items-center task-card ${task.completed ? 'task-done' : ''} ${isOverdue ? 'task-overdue' : ''}`;
                 
                 const typeLabels = {
-                    'once': `<i class="bi bi-calendar-event me-1"></i>一次性 (${task.date})`,
+                    'once': `<i class="bi bi-calendar-event me-1"></i>一次性 (${task.instanceDate})`,
                     'daily': `<i class="bi bi-arrow-repeat me-1"></i>每天`,
                     'weekly': `<i class="bi bi-calendar-range me-1"></i>每週`,
                     'monthly': `<i class="bi bi-calendar-month me-1"></i>每月`
@@ -734,8 +737,8 @@
                 div.innerHTML = `
                     <div>
                         <h6 class="mb-1 fw-bold">${highlightedTopic} <span class="badge rounded-pill ${isOverdue ? 'bg-danger' : 'bg-light text-primary border border-primary'} ms-2">${task.time}</span></h6>
-                        <small class="text-muted d-block"><i class="bi bi-info-circle me-1"></i>內容: ${highlightedContent}</small>
-                        <small class="text-muted d-block note-clickable" onclick="openTaskNote(${task.id})">
+                        <small class="text-muted d-block"><i class="bi bi-calendar-day me-1"></i>日期: ${task.instanceDate} | 內容: ${highlightedContent}</small>
+                        <small class="text-muted d-block note-clickable" onclick="openTaskNote(${task.id}, '${task.instanceDate}')">
                             <i class="bi bi-sticky me-1"></i>備註: ${highlightedNotes} 
                             ${task.images && task.images.length > 0 ? `<i class="bi bi-image text-info ms-1"></i>` : ''}
                             <i class="bi bi-arrows-fullscreen ms-1" style="font-size: 0.7rem;"></i>
@@ -743,16 +746,24 @@
                         <span class="badge bg-light text-dark mt-1">${typeLabels[task.recurrence_type]}</span>
                     </div>
                     <div>
-                        <button class="btn ${task.completed ? 'btn-success' : 'btn-outline-success'} btn-sm border-0" onclick="toggleComplete(${task.id})"><i class="bi ${task.completed ? 'bi-check-circle-fill' : 'bi-check-circle'}"></i></button>
+                        <button class="btn ${task.completed ? 'btn-success' : 'btn-outline-success'} btn-sm border-0" onclick="toggleComplete(${task.id}, '${task.instanceDate}')"><i class="bi ${task.completed ? 'bi-check-circle-fill' : 'bi-check-circle'}"></i></button>
                         <button class="btn btn-outline-warning btn-sm border-0" onclick="prepareEdit(${task.id})" ${task.completed ? 'disabled' : ''}><i class="bi bi-pencil-square"></i></button>
-                        <button class="btn btn-outline-danger btn-sm border-0" onclick="deleteTask(${task.id})"><i class="bi bi-trash3"></i></button>
+                        <button class="btn btn-outline-danger btn-sm border-0" onclick="deleteTask(${task.id}, '${task.instanceDate}')"><i class="bi bi-trash3"></i></button>
                     </div>
                 `;
                 taskList.appendChild(div);
             });
 
             renderPagination(totalPages);
-            updateCalendarEvents(filtered);
+        }
+
+        // 專門用於更新月曆顯示的函式
+        function updateCalendarView() {
+            if (!calendar) return;
+            const viewStart = calendar.view.activeStart.toISOString().split('T')[0];
+            const viewEnd = calendar.view.activeEnd.toISOString().split('T')[0];
+            const allInstances = getInstancesInRange(allTasks, viewStart, viewEnd);
+            updateCalendarEvents(allInstances);
         }
 
         function renderPagination(totalPages) {
@@ -823,65 +834,45 @@
             return text.replace(regex, '<mark>$1</mark>');
         }
 
-        function updateCalendarEvents(tasks) {
+        function updateCalendarEvents(instances) {
             if (!calendar) return;
             
-            // 使用 batchRendering 批次處理，避免渲染過程中的閃爍或消失
             calendar.batchRendering(() => {
-                // 清除現有的所有事件來源
                 calendar.getEventSources().forEach(source => source.remove());
 
-                const events = tasks.map(task => {
-                    const taskDate = task.date || new Date().toISOString().split('T')[0];
-                    
-                    // 判斷是否逾期 (邏輯與清單檢視一致)
-                    const now = new Date();
-                    const today = now.toISOString().split('T')[0];
-                    const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+                const now = new Date();
+                const today = now.toISOString().split('T')[0];
+                const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+                
+                // 取得關鍵字搜尋條件進行連動過濾
+                const query = document.getElementById('taskSearch')?.value.toLowerCase() || '';
+                const keywords = query.split(/\s+/).filter(k => k.trim());
 
-                    let isOverdue = false;
-                    if (!task.completed) {
-                        if (task.recurrence_type === 'once' && task.date) {
-                            if (task.date < today || (task.date === today && task.time < currentTime)) {
-                                isOverdue = true;
-                            }
-                        } else if (task.time < currentTime) {
-                            isOverdue = true;
-                        }
-                    }
-                    
+                const events = instances.filter(task => {
+                    const combinedText = (task.topic + ' ' + (task.content || '') + ' ' + (task.notes || '')).toLowerCase();
+                    return keywords.every(kw => combinedText.includes(kw));
+                }).map(task => {
+                    const isOverdue = !task.completed && (task.instanceDate < today || (task.instanceDate === today && task.time < currentTime));
+
                     const baseEvent = {
-                        id: String(task.id),
-                        // 將時間與主題合併，並在月曆標題顯示備註
+                        id: `${task.id}-${task.instanceDate}`,
                         title: `${task.time} ${task.topic}${task.notes ? ' [' + task.notes + ']' : ''}`,
-                        extendedProps: { ...task }
+                        start: task.instanceDate,
+                        extendedProps: { ...task, originalId: task.id }
                     };
                 
-                // 1. 無論是否完成，都必須設定時間與重複規則，月曆才能正確定位
-                if (task.recurrence_type === 'once') {
-                    baseEvent.start = taskDate;
-                } else if (task.recurrence_type === 'daily') {
-                    baseEvent.daysOfWeek = [0, 1, 2, 3, 4, 5, 6];
-                } else if (task.recurrence_type === 'weekly') {
-                    const day = new Date(taskDate).getDay();
-                    baseEvent.daysOfWeek = [day];
-                } else if (task.recurrence_type === 'monthly') {
-                    baseEvent.startRecur = taskDate;
-                }
-
-                // 2. 根據完成狀態設定顏色
-                if (task.completed) {
-                    baseEvent.backgroundColor = '#adb5bd'; // 已完成統一灰色
-                    baseEvent.borderColor = '#adb5bd';
-                } else if (isOverdue) {
-                    baseEvent.backgroundColor = '#dc3545'; // 逾期統一紅色
-                    baseEvent.borderColor = '#dc3545';
-                } else {
-                    const colors = { 'once': '#667eea', 'daily': '#28a745', 'weekly': '#fd7e14', 'monthly': '#6f42c1' };
-                    const themeColor = colors[task.recurrence_type] || '#667eea';
-                    baseEvent.backgroundColor = themeColor;
-                    baseEvent.borderColor = themeColor;
-                }
+                    if (task.completed) {
+                        baseEvent.backgroundColor = '#adb5bd';
+                        baseEvent.borderColor = '#adb5bd';
+                    } else if (isOverdue) {
+                        baseEvent.backgroundColor = '#dc3545';
+                        baseEvent.borderColor = '#dc3545';
+                    } else {
+                        const colors = { 'once': '#667eea', 'daily': '#28a745', 'weekly': '#fd7e14', 'monthly': '#6f42c1' };
+                        const themeColor = colors[task.recurrence_type] || '#667eea';
+                        baseEvent.backgroundColor = themeColor;
+                        baseEvent.borderColor = themeColor;
+                    }
                     return baseEvent;
                 });
 
@@ -948,19 +939,31 @@
         }
 
         // 切換完成狀態
-        function toggleComplete(id) {
+        function toggleComplete(id, date) {
             const index = allTasks.findIndex(t => t.id === id);
             if (index !== -1) {
-                allTasks[index].completed = !allTasks[index].completed;
+                if (!allTasks[index].overrides) allTasks[index].overrides = {};
+                if (!allTasks[index].overrides[date]) allTasks[index].overrides[date] = {};
+                
+                const currentStatus = allTasks[index].overrides[date].completed !== undefined ? allTasks[index].overrides[date].completed : allTasks[index].completed;
+                allTasks[index].overrides[date].completed = !currentStatus;
+                
                 saveTasks(allTasks);
                 fetchTasks();
             }
         }
 
         // 刪除任務
-        async function deleteTask(id) {
+        async function deleteTask(id, date) {
             if (!confirm('確定要刪除嗎?')) return;
-            allTasks = allTasks.filter(t => t.id !== id);
+            const index = allTasks.findIndex(t => t.id === id);
+            
+            if (allTasks[index].recurrence_type === 'once') {
+                allTasks = allTasks.filter(t => t.id !== id);
+            } else {
+                if (!allTasks[index].overrides) allTasks[index].overrides = {};
+                allTasks[index].overrides[date] = { ...allTasks[index].overrides[date], deleted: true };
+            }
             saveTasks(allTasks);
             fetchTasks();
         }
