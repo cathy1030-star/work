@@ -199,7 +199,7 @@
                     <div class="col-12">
                         <div class="input-group shadow-sm">
                             <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-muted"></i></span>
-                            <input type="text" id="taskSearch" class="form-control border-start-0 border-end-0" placeholder="搜尋關鍵字 (如: 喝水 提醒)..." oninput="currentPage=1; renderTasks(allTasks); updateCalendarView();">
+                            <input type="text" id="taskSearch" class="form-control border-start-0 border-end-0" placeholder="搜尋關鍵字 (如: 喝水 提醒)..." oninput="currentPage=1; renderTasks(allTasks);">
                             <button class="btn btn-outline-secondary border-start-0 bg-white text-muted" type="button" onclick="clearSearch('taskSearch', () => renderTasks(allTasks))">
                                 <i class="bi bi-x-circle"></i>
                             </button>
@@ -208,13 +208,13 @@
                     <div class="col-md-6">
                         <div class="input-group shadow-sm">
                             <span class="input-group-text bg-white">從</span>
-                            <input type="date" id="startDate" class="form-control" onchange="currentPage=1; renderTasks(allTasks); updateCalendarView();">
+                            <input type="date" id="startDate" class="form-control" onchange="currentPage=1; renderTasks(allTasks);">
                         </div>
                     </div>
                     <div class="col-md-6">
                         <div class="input-group shadow-sm">
                             <span class="input-group-text bg-white border-end-0">至</span>
-                            <input type="date" id="endDate" class="form-control border-start-0 border-end-0" onchange="currentPage=1; renderTasks(allTasks); updateCalendarView();">
+                            <input type="date" id="endDate" class="form-control border-start-0 border-end-0" onchange="currentPage=1; renderTasks(allTasks);">
                             <button class="btn btn-outline-secondary border-start-0 bg-white text-muted" type="button" onclick="clearDateRange()">
                                 <i class="bi bi-x-circle"></i>
                             </button>
@@ -392,7 +392,7 @@
                     right: 'dayGridMonth,timeGridWeek'
                 },
                 datesSet: function() {
-                    updateCalendarView(); // 監聽月曆翻頁（上一月/下一月），切換時自動重新計算並同步當月實例
+                    // 不再由月曆主動更新，統一由 renderTasks 控制，以達成嚴格同步
                 },
                 eventClick: function(info) {
                     const targetId = info.event.id; // 格式為 "id-date"
@@ -408,7 +408,6 @@
             // 當切換到月曆分頁時，必須強制重新計算尺寸與渲染，否則在隱藏狀態下初始化的日曆會無法顯示
             document.getElementById('calendar-tab').addEventListener('shown.bs.tab', () => {
                 calendar.updateSize();
-                updateCalendarView();
                 calendar.render();
             });
 
@@ -434,7 +433,6 @@
             const data = localStorage.getItem('tasks');
             allTasks = data ? JSON.parse(data) : [];
             renderTasks(allTasks);
-            updateCalendarView();
         }
 
         // --- SOP 說明邏輯 ---
@@ -573,7 +571,6 @@
                 
                 saveTasks(allTasks);
                 renderTasks(allTasks);
-                updateCalendarView(); // 確保備註修改後，月曆上的標題與圖示即時重新渲染
                 taskNoteModal.hide();
             }
         }
@@ -750,8 +747,13 @@
             const endInput = document.getElementById('endDate')?.value;
             
             const todayStr = new Date().toISOString().split('T')[0];
+            const limitDate = new Date();
+            limitDate.setMonth(limitDate.getMonth() + 3);
+            const limitStr = limitDate.toISOString().split('T')[0];
+
+            // 統一清單預設範圍：若無輸入，則從今天顯示到 3 個月後
             const rangeStart = startInput || todayStr;
-            const rangeEnd = endInput || rangeStart;
+            const rangeEnd = endInput || (startInput ? startInput : limitStr);
 
             const instances = getInstancesInRange(tasks, rangeStart, rangeEnd);
             const keywords = query.split(/\s+/).filter(k => k.trim());
@@ -841,15 +843,15 @@
             });
 
             renderPagination(totalPages);
+            
+            // 核心同步邏輯：清單過濾完什麼，月曆就顯示什麼
+            updateCalendarEvents(filtered);
         }
 
         // 專門用於更新月曆顯示的函式
         function updateCalendarView() {
-            if (!calendar) return;
-            const viewStart = calendar.view.activeStart.toISOString().split('T')[0];
-            const viewEnd = calendar.view.activeEnd.toISOString().split('T')[0];
-            const allInstances = getInstancesInRange(allTasks, viewStart, viewEnd);
-            updateCalendarEvents(allInstances);
+            // 此函式現在僅作為 renderTasks 的封裝，確保邏輯單一化
+            renderTasks(allTasks);
         }
 
         function renderPagination(totalPages) {
@@ -907,7 +909,6 @@
             document.getElementById('endDate').value = '';
             currentPage = 1;
             renderTasks(allTasks);
-            updateCalendarView();
         }
 
         // 文字高亮處理
@@ -928,26 +929,13 @@
             calendar.removeAllEvents();
             calendar.getEventSources().forEach(source => source.remove());
 
+            const query = document.getElementById('taskSearch')?.value.toLowerCase() || '';
             const now = new Date();
             const today = now.toISOString().split('T')[0];
             const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-                
-                // 取得關鍵字與日期區間搜尋條件進行全方位連動過濾
-                const query = document.getElementById('taskSearch')?.value.toLowerCase() || '';
-                const startDate = document.getElementById('startDate')?.value || '';
-                const endDate = document.getElementById('endDate')?.value || '';
-                const keywords = query.split(/\s+/).filter(k => k.trim());
 
-                const events = instances.filter(task => {
-                    const combinedText = (task.topic + ' ' + (task.content || '') + ' ' + (task.notes || '')).toLowerCase();
-                    const matchesKeywords = keywords.every(kw => combinedText.includes(kw));
-                    
-                    let matchesDate = true;
-                    if (startDate && task.instanceDate < startDate) matchesDate = false;
-                    if (endDate && task.instanceDate > endDate) matchesDate = false;
-                    
-                    return matchesKeywords && matchesDate;
-                }).map(task => {
+            // 直接使用傳入的實例進行渲染，因為傳入前已經由 renderTasks 過濾完畢
+            const events = instances.map(task => {
                     const isOverdue = !task.completed && (task.instanceDate < today || (task.instanceDate === today && task.time < currentTime));
 
                     const baseEvent = {
