@@ -134,6 +134,7 @@
                 <h5 class="card-title" id="formTitle">新增任務</h5>
                 <form id="taskForm" class="row g-3">
                     <input type="hidden" id="taskId">
+                    <input type="hidden" id="editDate">
                     <div class="col-md-4">
                         <input type="text" id="topic" class="form-control" placeholder="主題 (例如: 喝水)" required>
                     </div>
@@ -380,7 +381,7 @@
                     right: 'dayGridMonth,timeGridWeek'
                 },
                 eventClick: function(info) {
-                    prepareEdit(info.event.extendedProps.originalId);
+                    prepareEdit(info.event.extendedProps.originalId, info.event.startStr);
                 }
             });
             calendar.render();
@@ -671,14 +672,23 @@
         // 產生日期區間內的重複實例
         function getInstancesInRange(tasks, startStr, endStr) {
             const instances = [];
-            const start = new Date(startStr);
-            const end = new Date(endStr);
+            
+            // 設定 3 個月的期限，限制週期性任務產生的實例數量，避免資料過於龐大
+            const limitDate = new Date();
+            limitDate.setMonth(limitDate.getMonth() + 3);
+            const limitStr = limitDate.toISOString().split('T')[0];
 
             tasks.forEach(task => {
                 let curr = new Date(startStr);
                 const endD = new Date(endStr);
                 while (curr <= endD) {
                     const dateStr = curr.toISOString().split('T')[0];
+
+                    // 週期性任務限制僅產生從今日起 3 個月內的資料
+                    if (task.recurrence_type !== 'once' && dateStr > limitStr) {
+                        break; 
+                    }
+
                     let isMatch = false;
 
                     if (task.recurrence_type === 'once') {
@@ -699,6 +709,9 @@
                             instances.push({
                                 ...task,
                                 instanceDate: dateStr,
+                                topic: override.topic || task.topic,
+                                content: override.content || task.content,
+                                time: override.time || task.time,
                                 completed: override.completed !== undefined ? override.completed : task.completed,
                                 notes: override.notes || task.notes,
                                 images: override.images || task.images
@@ -790,7 +803,7 @@
                     </div>
                     <div>
                         <button class="btn ${task.completed ? 'btn-success' : 'btn-outline-success'} btn-sm border-0" onclick="toggleComplete(${task.id}, '${task.instanceDate}')"><i class="bi ${task.completed ? 'bi-check-circle-fill' : 'bi-check-circle'}"></i></button>
-                        <button class="btn btn-outline-warning btn-sm border-0" onclick="prepareEdit(${task.id})" ${task.completed ? 'disabled' : ''}><i class="bi bi-pencil-square"></i></button>
+                        <button class="btn btn-outline-warning btn-sm border-0" onclick="prepareEdit(${task.id}, '${task.instanceDate}')" ${task.completed ? 'disabled' : ''}><i class="bi bi-pencil-square"></i></button>
                         <button class="btn btn-outline-danger btn-sm border-0" onclick="deleteTask(${task.id}, '${task.instanceDate}')"><i class="bi bi-trash3"></i></button>
                     </div>
                 `;
@@ -880,12 +893,13 @@
         function updateCalendarEvents(instances) {
             if (!calendar) return;
             
-            calendar.batchRendering(() => {
-                calendar.getEventSources().forEach(source => source.remove());
+            // 徹底清除月曆上所有現有事件與來源，防止刪除後的任務殘留在快取中
+            calendar.removeAllEvents();
+            calendar.getEventSources().forEach(source => source.remove());
 
-                const now = new Date();
-                const today = now.toISOString().split('T')[0];
-                const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+            const now = new Date();
+            const today = now.toISOString().split('T')[0];
+            const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
                 
                 // 取得關鍵字搜尋條件進行連動過濾
                 const query = document.getElementById('taskSearch')?.value.toLowerCase() || '';
@@ -920,13 +934,13 @@
                 });
 
                 calendar.addEventSource(events);
-            });
         }
 
         // 新增任務
         taskForm.onsubmit = async (e) => {
             e.preventDefault();
-            const id = document.getElementById('taskId').value; // 修改模式會有 ID
+            const id = document.getElementById('taskId').value;
+            const editDate = document.getElementById('editDate').value;
             const data = {
                 topic: document.getElementById('topic').value,
                 content: document.getElementById('content').value,
@@ -938,9 +952,22 @@
             };
 
             if (id) {
-                // 修改邏輯
                 const index = allTasks.findIndex(t => t.id == id);
-                allTasks[index] = { ...allTasks[index], ...data }; // 保留原本的 completed 狀態
+                if (index !== -1) {
+                    if (editDate && allTasks[index].recurrence_type !== 'once') {
+                        // 單獨修改此日期實例
+                        if (!allTasks[index].overrides) allTasks[index].overrides = {};
+                        allTasks[index].overrides[editDate] = {
+                            ...allTasks[index].overrides[editDate],
+                            topic: data.topic,
+                            content: data.content,
+                            time: data.time
+                        };
+                    } else {
+                        // 修改整個任務系列
+                        allTasks[index] = { ...allTasks[index], ...data };
+                    }
+                }
             } else {
                 // 新增邏輯
                 data.id = Date.now(); // 使用時間戳記當作臨時 ID
@@ -954,20 +981,29 @@
         };
 
         // 準備編輯：將資料填入表單
-        function prepareEdit(id) {
+        function prepareEdit(id, date = null) {
             const task = allTasks.find(t => t.id === id);
             if (!task) return;
 
-            document.getElementById('taskId').value = task.id;
-            document.getElementById('topic').value = task.topic;
-            document.getElementById('content').value = task.content || '';
-            document.getElementById('notes').value = task.notes || '';
-            document.getElementById('recurrenceType').value = task.recurrence_type;
-            document.getElementById('date').value = task.date || '';
-            document.getElementById('time').value = task.time;
+            const override = (date && task.overrides && task.overrides[date]) ? task.overrides[date] : {};
 
-            document.getElementById('formTitle').innerText = '📝 修改任務';
-            document.getElementById('submitBtn').innerText = '更新任務';
+            document.getElementById('taskId').value = task.id;
+            document.getElementById('editDate').value = date || '';
+            document.getElementById('topic').value = override.topic || task.topic;
+            document.getElementById('content').value = override.content || task.content || '';
+            document.getElementById('notes').value = override.notes || task.notes || '';
+            document.getElementById('recurrenceType').value = task.recurrence_type;
+            document.getElementById('date').value = date || task.date || '';
+            document.getElementById('time').value = override.time || task.time;
+
+            if (date && task.recurrence_type !== 'once') {
+                document.getElementById('formTitle').innerText = `📝 修改單次任務 (${date})`;
+                document.getElementById('submitBtn').innerText = '僅更新此日期';
+            } else {
+                document.getElementById('formTitle').innerText = '📝 修改任務系列';
+                document.getElementById('submitBtn').innerText = '更新系列任務';
+            }
+
             document.getElementById('cancelBtn').classList.remove('d-none');
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
@@ -976,6 +1012,7 @@
         function cancelEdit() {
             taskForm.reset();
             document.getElementById('taskId').value = '';
+            document.getElementById('editDate').value = '';
             document.getElementById('formTitle').innerText = '新增任務';
             document.getElementById('submitBtn').innerText = '新增';
             document.getElementById('cancelBtn').classList.add('d-none');
@@ -999,11 +1036,12 @@
         // 刪除任務
         async function deleteTask(id, date) {
             if (!confirm('確定要刪除嗎?')) return;
-            const index = allTasks.findIndex(t => t.id === id);
+            // 使用鬆散比對或確保型別一致，防止 Date.now() 產生的 ID 在傳遞過程中變成字串導致找不到
+            const index = allTasks.findIndex(t => t.id == id);
             if (index === -1) return;
             
             if (allTasks[index].recurrence_type === 'once') {
-                allTasks = allTasks.filter(t => t.id !== id);
+                allTasks = allTasks.filter(t => t.id != id);
             } else {
                 if (!allTasks[index].overrides) allTasks[index].overrides = {};
                 allTasks[index].overrides[date] = { ...allTasks[index].overrides[date], deleted: true };
