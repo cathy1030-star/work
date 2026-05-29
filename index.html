@@ -28,6 +28,7 @@
             margin-bottom: 15px; 
             border-left: 5px solid #667eea; 
             transition: transform 0.2s, box-shadow 0.2s;
+            scroll-margin-top: 100px; /* 為 Mobile 捲動預留頂部空間，避免被 Header 遮擋 */
         }
         .task-card:hover {
             transform: translateY(-3px);
@@ -83,6 +84,16 @@
         mark {
             background-color: #ffeb3b;
             padding: 0;
+        }
+        /* 任務高亮動畫效果 */
+        .task-highlight {
+            border: 2px solid #764ba2 !important;
+            animation: highlight-glow 2s ease-in-out;
+        }
+        @keyframes highlight-glow {
+            0% { box-shadow: 0 0 0px #764ba2; background-color: #fff; }
+            50% { box-shadow: 0 0 20px #764ba2; background-color: #f3e5f5; }
+            100% { box-shadow: 0 0 0px #764ba2; background-color: #fff; }
         }
         /* 圖片預覽樣式 */
         .img-preview-container {
@@ -197,13 +208,13 @@
                     <div class="col-md-6">
                         <div class="input-group shadow-sm">
                             <span class="input-group-text bg-white">從</span>
-                            <input type="date" id="startDate" class="form-control" onchange="currentPage=1; renderTasks(allTasks)">
+                            <input type="date" id="startDate" class="form-control" onchange="currentPage=1; renderTasks(allTasks); updateCalendarView();">
                         </div>
                     </div>
                     <div class="col-md-6">
                         <div class="input-group shadow-sm">
                             <span class="input-group-text bg-white border-end-0">至</span>
-                            <input type="date" id="endDate" class="form-control border-start-0 border-end-0" onchange="currentPage=1; renderTasks(allTasks)">
+                            <input type="date" id="endDate" class="form-control border-start-0 border-end-0" onchange="currentPage=1; renderTasks(allTasks); updateCalendarView();">
                             <button class="btn btn-outline-secondary border-start-0 bg-white text-muted" type="button" onclick="clearDateRange()">
                                 <i class="bi bi-x-circle"></i>
                             </button>
@@ -380,14 +391,22 @@
                     center: 'title',
                     right: 'dayGridMonth,timeGridWeek'
                 },
+                datesSet: function() {
+                    updateCalendarView(); // 監聽月曆翻頁（上一月/下一月），切換時自動重新計算並同步當月實例
+                },
                 eventClick: function(info) {
-                    prepareEdit(info.event.extendedProps.originalId, info.event.startStr);
+                    const targetId = info.event.id; // 格式為 "id-date"
+                    // 1. 切換至清單檢視 Tab
+                    const listTab = document.querySelector('#list-tab');
+                    bootstrap.Tab.getOrCreateInstance(listTab).show();
+                    // 2. 執行高亮定位與渲染
+                    renderTasks(allTasks, targetId);
                 }
             });
             calendar.render();
             
             // 當切換到月曆分頁時，必須強制重新計算尺寸與渲染，否則在隱藏狀態下初始化的日曆會無法顯示
-            document.getElementById('calendar-tab').addEventListener('shown.bs.tab', (e) => {
+            document.getElementById('calendar-tab').addEventListener('shown.bs.tab', () => {
                 calendar.updateSize();
                 updateCalendarView();
                 calendar.render();
@@ -554,6 +573,7 @@
                 
                 saveTasks(allTasks);
                 renderTasks(allTasks);
+                updateCalendarView(); // 確保備註修改後，月曆上的標題與圖示即時重新渲染
                 taskNoteModal.hide();
             }
         }
@@ -672,7 +692,7 @@
         // 產生日期區間內的重複實例
         function getInstancesInRange(tasks, startStr, endStr) {
             const instances = [];
-            
+
             // 設定 3 個月的期限，限制週期性任務產生的實例數量，避免資料過於龐大
             const limitDate = new Date();
             limitDate.setMonth(limitDate.getMonth() + 3);
@@ -724,7 +744,7 @@
             return instances;
         }
 
-        function renderTasks(tasks) {
+        function renderTasks(tasks, highlightTarget = null) {
             const query = document.getElementById('taskSearch')?.value.toLowerCase() || '';
             const startInput = document.getElementById('startDate')?.value;
             const endInput = document.getElementById('endDate')?.value;
@@ -754,6 +774,14 @@
                 return a.time.localeCompare(b.time);
             });
 
+            // 如果有指定高亮目標，計算該目標在哪一個分頁
+            if (highlightTarget) {
+                const targetIndex = sortedTasks.findIndex(t => `${t.id}-${t.instanceDate}` === highlightTarget);
+                if (targetIndex !== -1) {
+                    currentPage = Math.floor(targetIndex / itemsPerPage) + 1;
+                }
+            }
+
             // 處理分頁切割
             const totalPages = Math.ceil(sortedTasks.length / itemsPerPage) || 1;
             if (currentPage > totalPages) currentPage = totalPages;
@@ -780,8 +808,10 @@
                 const highlightedContent = highlightText(task.content || '無內容', query);
                 const highlightedNotes = highlightText(task.notes || '無', query);
 
+                const taskDomId = `task-${task.id}-${task.instanceDate}`;
                 const div = document.createElement('div');
-                div.className = `list-group-item list-group-item-action d-flex justify-content-between align-items-center task-card ${task.completed ? 'task-done' : ''} ${isOverdue ? 'task-overdue' : ''}`;
+                div.id = taskDomId;
+                div.className = `list-group-item list-group-item-action d-flex justify-content-between align-items-center task-card ${task.completed ? 'task-done' : ''} ${isOverdue ? 'task-overdue' : ''} ${highlightTarget === `${task.id}-${task.instanceDate}` ? 'task-highlight' : ''}`;
                 
                 const typeLabels = {
                     'once': `<i class="bi bi-calendar-event me-1"></i>一次性 (${task.instanceDate})`,
@@ -877,6 +907,7 @@
             document.getElementById('endDate').value = '';
             currentPage = 1;
             renderTasks(allTasks);
+            updateCalendarView();
         }
 
         // 文字高亮處理
@@ -901,13 +932,21 @@
             const today = now.toISOString().split('T')[0];
             const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
                 
-                // 取得關鍵字搜尋條件進行連動過濾
+                // 取得關鍵字與日期區間搜尋條件進行全方位連動過濾
                 const query = document.getElementById('taskSearch')?.value.toLowerCase() || '';
+                const startDate = document.getElementById('startDate')?.value || '';
+                const endDate = document.getElementById('endDate')?.value || '';
                 const keywords = query.split(/\s+/).filter(k => k.trim());
 
                 const events = instances.filter(task => {
                     const combinedText = (task.topic + ' ' + (task.content || '') + ' ' + (task.notes || '')).toLowerCase();
-                    return keywords.every(kw => combinedText.includes(kw));
+                    const matchesKeywords = keywords.every(kw => combinedText.includes(kw));
+                    
+                    let matchesDate = true;
+                    if (startDate && task.instanceDate < startDate) matchesDate = false;
+                    if (endDate && task.instanceDate > endDate) matchesDate = false;
+                    
+                    return matchesKeywords && matchesDate;
                 }).map(task => {
                     const isOverdue = !task.completed && (task.instanceDate < today || (task.instanceDate === today && task.time < currentTime));
 
