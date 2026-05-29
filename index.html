@@ -1,0 +1,969 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>每日工作提醒管理</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.10/index.global.min.js"></script>
+    <style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        body { 
+            background: #f0f2f5; 
+            font-family: 'Segoe UI', 'Microsoft JhengHei', sans-serif;
+            padding-top: 30px; 
+        }
+        .header-section {
+            background: var(--primary-gradient);
+            color: white;
+            padding: 2rem;
+            border-radius: 15px;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .task-card { 
+            margin-bottom: 15px; 
+            border-left: 5px solid #667eea; 
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .task-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        .task-done { 
+            background-color: #e9ecef !important; 
+            color: #adb5bd !important; 
+            border-left-color: #adb5bd !important;
+        }
+        .task-done h6, .task-done small {
+            text-decoration: line-through;
+            color: #adb5bd !important;
+        }
+        #calendar {
+            background: white;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+        }
+        .nav-pills .nav-link.active {
+            background: var(--primary-gradient);
+        }
+        /* 逾期任務樣式 */
+        .task-overdue {
+            border-left-color: #dc3545 !important;
+            background-color: #fff5f5 !important;
+        }
+        .task-overdue h6 {
+            color: #dc3545 !important;
+        }
+        /* SOP 彈窗深色模式樣式 */
+        .sop-dark-editor {
+            background-color: #212529 !important;
+            color: #f8f9fa !important;
+        }
+        .sop-dark-editor textarea, 
+        .sop-dark-editor input {
+            background-color: #2c3034 !important;
+            color: #f8f9fa !important;
+            border-color: #495057 !important;
+        }
+        /* 任務備註點擊樣式 */
+        .note-clickable {
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+        .note-clickable:hover {
+            color: #764ba2 !important;
+            text-decoration: underline;
+        }
+        /* 搜尋高亮樣式 */
+        mark {
+            background-color: #ffeb3b;
+            padding: 0;
+        }
+        /* 圖片預覽樣式 */
+        .img-preview-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .img-preview-item {
+            position: relative;
+            width: 80px;
+            height: 80px;
+        }
+        .img-preview-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+        }
+        .img-delete-btn {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: #dc3545;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            border: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-section text-center">
+            <h2 class="fw-bold"><i class="bi bi-calendar-check-fill me-2"></i>任務管理中心</h2>
+            <p class="mb-0 opacity-75">效率生活，從計畫每一天開始</p>
+        </div>
+        
+        <!-- 新增任務表單 -->
+        <div class="card mb-4 shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title" id="formTitle">新增任務</h5>
+                <form id="taskForm" class="row g-3">
+                    <input type="hidden" id="taskId">
+                    <div class="col-md-4">
+                        <input type="text" id="topic" class="form-control" placeholder="主題 (例如: 喝水)" required>
+                    </div>
+                    <div class="col-md-4">
+                        <input type="text" id="content" class="form-control" placeholder="內容">
+                    </div>
+                    <div class="col-md-4">
+                        <input type="text" id="notes" class="form-control" placeholder="備註">
+                    </div>
+                    <div class="col-md-3">
+                        <select id="recurrenceType" class="form-select">
+                            <option value="once">一次性</option>
+                            <option value="daily">每天</option>
+                            <option value="weekly">每週</option>
+                            <option value="monthly">每月</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <input type="date" id="date" class="form-control">
+                    </div>
+                    <div class="col-md-3">
+                        <input type="time" id="time" class="form-control" value="09:00" required>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="d-grid gap-2 d-md-flex">
+                            <button type="submit" id="submitBtn" class="btn btn-primary px-4"><i class="bi bi-plus-lg me-1"></i>新增</button>
+                            <button type="button" id="cancelBtn" class="btn btn-outline-secondary d-none" onclick="cancelEdit()">取消</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- 分頁切換 -->
+        <ul class="nav nav-pills mb-4 justify-content-center" id="viewTab" role="tablist">
+            <li class="nav-item">
+                <button class="nav-link active" id="list-tab" data-bs-toggle="pill" data-bs-target="#listView" type="button"><i class="bi bi-list-task me-1"></i>清單檢視</button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" id="calendar-tab" data-bs-toggle="pill" data-bs-target="#calendarView" type="button"><i class="bi bi-calendar3 me-1"></i>月曆圖表</button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" id="sop-tab" data-bs-toggle="pill" data-bs-target="#sopView" type="button"><i class="bi bi-book me-1"></i>工作 SOP</button>
+            </li>
+        </ul>
+
+        <div class="tab-content">
+            <!-- 清單檢視區 -->
+            <div class="tab-pane fade show active" id="listView">
+                <div class="row g-2 mb-3">
+                    <div class="col-12">
+                        <div class="input-group shadow-sm">
+                            <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-muted"></i></span>
+                            <input type="text" id="taskSearch" class="form-control border-start-0 border-end-0" placeholder="搜尋關鍵字 (如: 喝水 提醒)..." oninput="currentPage=1; renderTasks(allTasks)">
+                            <button class="btn btn-outline-secondary border-start-0 bg-white text-muted" type="button" onclick="clearSearch('taskSearch', () => renderTasks(allTasks))">
+                                <i class="bi bi-x-circle"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="input-group shadow-sm">
+                            <span class="input-group-text bg-white">從</span>
+                            <input type="date" id="startDate" class="form-control" onchange="currentPage=1; renderTasks(allTasks)">
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="input-group shadow-sm">
+                            <span class="input-group-text bg-white border-end-0">至</span>
+                            <input type="date" id="endDate" class="form-control border-start-0 border-end-0" onchange="currentPage=1; renderTasks(allTasks)">
+                            <button class="btn btn-outline-secondary border-start-0 bg-white text-muted" type="button" onclick="clearDateRange()">
+                                <i class="bi bi-x-circle"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mb-2 px-1">
+                    <span class="text-muted small"><i class="bi bi-info-circle me-1"></i>任務清單</span>
+                    <div class="d-flex align-items-center">
+                        <label class="text-muted small me-2 mb-0">每頁顯示：</label>
+                        <select id="itemsPerPageSelect" class="form-select form-select-sm w-auto shadow-sm" onchange="changeItemsPerPage(this.value)">
+                            <option value="5">5</option>
+                            <option value="10">10</option>
+                            <option value="20">20</option>
+                            <option value="50">50</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="taskList" class="list-group border-0">
+                    <!-- 任務會動態顯示在這裡 -->
+                </div>
+                <!-- 分頁按鈕區 -->
+                <nav aria-label="Task pagination" class="mt-4">
+                    <ul class="pagination justify-content-center" id="taskPagination">
+                    </ul>
+                </nav>
+            </div>
+            <!-- 月曆檢視區 -->
+            <div class="tab-pane fade" id="calendarView">
+                <div id="calendar"></div>
+            </div>
+            <!-- 工作 SOP 區 -->
+            <div class="tab-pane fade" id="sopView">
+                <div class="mb-3">
+                    <div class="input-group shadow-sm">
+                        <span class="input-group-text bg-white border-end-0"><i class="bi bi-search text-muted"></i></span>
+                        <input type="text" id="sopSearch" class="form-control border-start-0 border-end-0" placeholder="搜尋關鍵字 (如: 開機 流程)..." oninput="renderSOPs()">
+                        <button class="btn btn-outline-secondary border-start-0 bg-white text-muted" type="button" onclick="clearSearch('sopSearch', () => renderSOPs())">
+                            <i class="bi bi-x-circle"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="card border-0 shadow-sm mb-4">
+                    <div class="card-body">
+                        <h5 class="card-title fw-bold"><i class="bi bi-plus-circle me-2"></i>新增 SOP 說明</h5>
+                        <div class="row g-3">
+                            <div class="col-md-5">
+                                <input type="text" id="sopTitle" class="form-control" placeholder="項目名稱 (例如: 每日開機流程)">
+                            </div>
+                            <div class="col-md-7">
+                                <textarea id="sopContent" class="form-control" rows="1" placeholder="詳細步驟與說明內容..."></textarea>
+                            </div>
+                            <div class="col-12 text-end">
+                                <button class="btn btn-primary px-4" onclick="addSOP()"><i class="bi bi-save me-1"></i>儲存說明</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="sopList" class="row g-3">
+                    <!-- SOP 卡片將動態顯示在這裡 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 任務備註詳細內容與編輯彈窗 -->
+    <div class="modal fade" id="taskNoteModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title fw-bold"><i class="bi bi-sticky-fill me-2"></i>任務備註詳情</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="editTaskNoteId">
+                    <div class="d-flex justify-content-end mb-3 gap-2 border-bottom pb-2">
+                        <div class="btn-group">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="adjustTaskNoteFontSize(2)"><i class="bi bi-zoom-in"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="adjustTaskNoteFontSize(-2)"><i class="bi bi-zoom-out"></i></button>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('taskNoteImgInput').click()">
+                            <i class="bi bi-image"></i> 插圖
+                        </button>
+                        <input type="file" id="taskNoteImgInput" hidden accept="image/*" onchange="handleImageSelect(event, 'task')">
+                        <button type="button" id="copyTaskNoteBtn" class="btn btn-sm btn-outline-secondary" onclick="copyTaskNoteToClipboard()">
+                            <i class="bi bi-clipboard"></i> 複製備註
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleTaskNoteDarkMode()">
+                            <i class="bi bi-moon-stars"></i> 深色模式
+                        </button>
+                    </div>
+                    <div class="mb-3">
+                        <textarea id="taskNoteTextarea" class="form-control" rows="12" style="white-space: pre-wrap;"></textarea>
+                    </div>
+                    <div id="taskNoteImgPreview" class="img-preview-container"></div>
+                    <small class="text-muted mt-2 d-block"><i class="bi bi-info-circle me-1"></i>提示：支援 Ctrl+V 直接貼上截圖</small>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-warning px-4 fw-bold" onclick="updateTaskNote()">儲存備註</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SOP 詳細內容與編輯彈窗 -->
+    <div class="modal fade" id="sopModal" tabindex="-1" aria-labelledby="sopModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title fw-bold" id="sopModalLabel"><i class="bi bi-pencil-square me-2"></i>編輯 SOP 說明</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" id="editSopId">
+                    <!-- SOP 工具列：字體與深色模式 -->
+                    <div class="d-flex justify-content-end mb-3 gap-2 border-bottom pb-2">
+                        <div class="btn-group">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="adjustSopFontSize(2)" title="放大字體"><i class="bi bi-zoom-in"></i></button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="adjustSopFontSize(-2)" title="縮小字體"><i class="bi bi-zoom-out"></i></button>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('sopImgInput').click()">
+                            <i class="bi bi-image"></i> 插圖
+                        </button>
+                        <input type="file" id="sopImgInput" hidden accept="image/*" onchange="handleImageSelect(event, 'sop')">
+                        <button type="button" id="copySopBtn" class="btn btn-sm btn-outline-secondary" onclick="copySopToClipboard()" title="複製內容">
+                            <i class="bi bi-clipboard"></i> 複製內容
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" onclick="toggleSopDarkMode()" title="切換深色模式">
+                            <i class="bi bi-moon-stars"></i> 深色模式
+                        </button>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">項目名稱</label>
+                        <input type="text" id="editSopTitleModal" class="form-control form-control-lg">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">詳細說明內容</label>
+                        <textarea id="editSopContentModal" class="form-control" rows="12" style="white-space: pre-wrap;"></textarea>
+                    </div>
+                    <div id="sopImgPreview" class="img-preview-container"></div>
+                    <small class="text-muted mt-2 d-block"><i class="bi bi-info-circle me-1"></i>提示：支援 Ctrl+V 直接貼上截圖</small>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                    <button type="button" class="btn btn-primary px-4" onclick="updateSOP()"><i class="bi bi-check-lg me-1"></i>儲存變更</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const taskList = document.getElementById('taskList');
+        const taskForm = document.getElementById('taskForm');
+        let allTasks = [];
+        let calendar;
+        let sopModal;
+        let taskNoteModal;
+        let currentSopFontSize = 16;
+        let currentTaskNoteFontSize = 16;
+        let currentModalImages = []; // 用於暫存目前彈窗中的圖片
+        let currentPage = 1;
+        let itemsPerPage = parseInt(localStorage.getItem('itemsPerPage')) || 5;
+
+        // 初始化日曆
+        document.addEventListener('DOMContentLoaded', function() {
+            const calendarEl = document.getElementById('calendar');
+            calendar = new FullCalendar.Calendar(calendarEl, {
+                initialView: 'dayGridMonth',
+                locale: 'zh-tw',
+                headerToolbar: {
+                    left: 'prev,next today',
+                    center: 'title',
+                    right: 'dayGridMonth,timeGridWeek'
+                },
+                eventClick: function(info) {
+                    prepareEdit(parseInt(info.event.id));
+                }
+            });
+            calendar.render();
+            
+            // 當切換到月曆分頁時，必須強制重新計算尺寸與渲染，否則在隱藏狀態下初始化的日曆會無法顯示
+            document.getElementById('calendar-tab').addEventListener('shown.bs.tab', () => {
+                calendar.updateSize();
+                calendar.render();
+            });
+
+            // 確保月曆初始化後才載入資料
+            fetchTasks();
+            loadSOPs();
+            
+            // 設定每頁筆數下拉選單的初始值
+            document.getElementById('itemsPerPageSelect').value = itemsPerPage;
+            
+            // 初始化彈窗實例
+            sopModal = new bootstrap.Modal(document.getElementById('sopModal'));
+            taskNoteModal = new bootstrap.Modal(document.getElementById('taskNoteModal'));
+
+            // 註冊貼上事件
+            document.getElementById('taskNoteTextarea').addEventListener('paste', (e) => handlePaste(e, 'task'));
+            document.getElementById('editSopContentModal').addEventListener('paste', (e) => handlePaste(e, 'sop'));
+        });
+
+        // 獲取所有任務
+        async function fetchTasks() {
+            // 改用 localStorage 取得資料
+            const data = localStorage.getItem('tasks');
+            allTasks = data ? JSON.parse(data) : [];
+            renderTasks(allTasks);
+        }
+
+        // --- SOP 說明邏輯 ---
+        let allSOPs = [];
+
+        function loadSOPs() {
+            const data = localStorage.getItem('work_sops');
+            allSOPs = data ? JSON.parse(data) : [];
+            renderSOPs();
+        }
+
+        function addSOP() {
+            const title = document.getElementById('sopTitle').value;
+            const content = document.getElementById('sopContent').value;
+            
+            if (!title || !content) {
+                alert('請填寫標題與說明內容');
+                return;
+            }
+
+            allSOPs.push({ id: Date.now(), title, content });
+            localStorage.setItem('work_sops', JSON.stringify(allSOPs));
+            
+            document.getElementById('sopTitle').value = '';
+            document.getElementById('sopContent').value = '';
+            renderSOPs();
+        }
+
+        function deleteSOP(id) {
+            if (!confirm('確定要刪除這條 SOP 說明嗎？')) return;
+            allSOPs = allSOPs.filter(s => s.id !== id);
+            localStorage.setItem('work_sops', JSON.stringify(allSOPs));
+            renderSOPs();
+        }
+
+        function openSOPDetail(id) {
+            const sop = allSOPs.find(s => s.id === id);
+            if (!sop) return;
+
+            document.getElementById('editSopId').value = sop.id;
+            document.getElementById('editSopTitleModal').value = sop.title;
+            document.getElementById('editSopContentModal').value = sop.content;
+            currentModalImages = sop.images || [];
+            renderImagePreviews(currentModalImages, 'sopImgPreview');
+            
+            sopModal.show();
+        }
+
+        function updateSOP() {
+            const id = parseInt(document.getElementById('editSopId').value);
+            const title = document.getElementById('editSopTitleModal').value;
+            const content = document.getElementById('editSopContentModal').value;
+
+            const index = allSOPs.findIndex(s => s.id === id);
+            if (index !== -1) {
+                allSOPs[index] = { ...allSOPs[index], title, content, images: currentModalImages };
+                localStorage.setItem('work_sops', JSON.stringify(allSOPs));
+                renderSOPs();
+                sopModal.hide();
+            }
+        }
+
+        // --- 圖片處理邏輯 ---
+        function handleImageSelect(event, type) {
+            const files = event.target.files;
+            if (files) {
+                Array.from(files).forEach(file => processImageFile(file, type));
+            }
+        }
+
+        function handlePaste(event, type) {
+            const items = event.clipboardData.items;
+            for (let i = 0; i < items.length; i++) {
+                if (items[i].type.indexOf('image') !== -1) {
+                    const file = items[i].getAsFile();
+                    processImageFile(file, type);
+                }
+            }
+        }
+
+        function processImageFile(file, type) {
+            // 限制單張圖片大小避免 localStorage 爆炸 (建議 < 1MB)
+            if (file.size > 1024 * 1024) {
+                alert('圖片太大囉！請上傳小於 1MB 的圖片。');
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                currentModalImages.push(e.target.result);
+                renderImagePreviews(currentModalImages, type === 'task' ? 'taskNoteImgPreview' : 'sopImgPreview');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function renderImagePreviews(images, containerId) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = images.map((img, index) => `
+                <div class="img-preview-item">
+                    <img src="${img}" onclick="window.open('${img}')" title="點擊放大檢視">
+                    <button class="img-delete-btn" onclick="removeImage(${index}, '${containerId}')">×</button>
+                </div>
+            `).join('');
+        }
+
+        function removeImage(index, containerId) {
+            currentModalImages.splice(index, 1);
+            renderImagePreviews(currentModalImages, containerId);
+        }
+
+        // --- 任務備註詳情邏輯 ---
+        function openTaskNote(id) {
+            const task = allTasks.find(t => t.id === id);
+            if (!task) return;
+
+            document.getElementById('editTaskNoteId').value = task.id;
+            document.getElementById('taskNoteTextarea').value = task.notes || '';
+            currentModalImages = task.images || [];
+            renderImagePreviews(currentModalImages, 'taskNoteImgPreview');
+            taskNoteModal.show();
+        }
+
+        function updateTaskNote() {
+            const id = parseInt(document.getElementById('editTaskNoteId').value);
+            const notes = document.getElementById('taskNoteTextarea').value;
+
+            const index = allTasks.findIndex(t => t.id === id);
+            if (index !== -1) {
+                allTasks[index].notes = notes;
+                allTasks[index].images = currentModalImages;
+                saveTasks(allTasks);
+                renderTasks(allTasks);
+                taskNoteModal.hide();
+            }
+        }
+
+        function adjustTaskNoteFontSize(delta) {
+            currentTaskNoteFontSize += delta;
+            if (currentTaskNoteFontSize < 12) currentTaskNoteFontSize = 12;
+            if (currentTaskNoteFontSize > 40) currentTaskNoteFontSize = 40;
+            document.getElementById('taskNoteTextarea').style.fontSize = currentTaskNoteFontSize + 'px';
+        }
+
+        function toggleTaskNoteDarkMode() {
+            document.querySelector('#taskNoteModal .modal-body').classList.toggle('sop-dark-editor');
+        }
+
+        async function copyTaskNoteToClipboard() {
+            const content = document.getElementById('taskNoteTextarea').value;
+            const btn = document.getElementById('copyTaskNoteBtn');
+            if (!content) return;
+
+            try {
+                await navigator.clipboard.writeText(content);
+                const originalHTML = btn.innerHTML;
+                btn.innerHTML = '<i class="bi bi-check-lg"></i> 已複製';
+                btn.classList.replace('btn-outline-secondary', 'btn-success');
+                
+                setTimeout(() => {
+                    btn.innerHTML = originalHTML;
+                    btn.classList.replace('btn-success', 'btn-outline-secondary');
+                }, 2000);
+            } catch (err) {
+                alert('複製失敗');
+            }
+        }
+
+        // 調整 SOP 彈窗字體大小
+        function adjustSopFontSize(delta) {
+            currentSopFontSize += delta;
+            if (currentSopFontSize < 12) currentSopFontSize = 12;
+            if (currentSopFontSize > 40) currentSopFontSize = 40;
+            
+            const textarea = document.getElementById('editSopContentModal');
+            textarea.style.fontSize = currentSopFontSize + 'px';
+        }
+
+        // 切換 SOP 彈窗深色模式
+        function toggleSopDarkMode() {
+            const modalBody = document.querySelector('#sopModal .modal-body');
+            modalBody.classList.toggle('sop-dark-editor');
+        }
+
+        // 複製 SOP 內容到剪貼簿
+        async function copySopToClipboard() {
+            const title = document.getElementById('editSopTitleModal').value;
+            const content = document.getElementById('editSopContentModal').value;
+            const btn = document.getElementById('copySopBtn');
+            
+            const textToCopy = `【${title}】\n\n${content}`;
+
+            try {
+                await navigator.clipboard.writeText(textToCopy);
+                
+                // 成功反饋：改變按鈕圖示與文字
+                const originalHTML = btn.innerHTML;
+                btn.innerHTML = '<i class="bi bi-check-lg"></i> 已複製';
+                btn.classList.replace('btn-outline-secondary', 'btn-success');
+                
+                setTimeout(() => {
+                    btn.innerHTML = originalHTML;
+                    btn.classList.replace('btn-success', 'btn-outline-secondary');
+                }, 2000);
+            } catch (err) {
+                alert('複製失敗，請手動選取文字複製。');
+            }
+        }
+
+        function renderSOPs() {
+            const query = document.getElementById('sopSearch')?.value.toLowerCase() || '';
+            const keywords = query.split(/\s+/).filter(k => k.trim()); // 拆分多個關鍵字
+            
+            const filtered = allSOPs.filter(s => {
+                const combinedText = (s.title + ' ' + s.content).toLowerCase();
+                return keywords.every(kw => combinedText.includes(kw)); // 必須包含所有關鍵字
+            });
+
+            const list = document.getElementById('sopList');
+            list.innerHTML = filtered.map(s => {
+                const highlightedTitle = highlightText(s.title, query);
+                const highlightedContent = highlightText(s.content, query);
+                return `
+                <div class="col-md-6 mb-3">
+                    <div class="card h-100 border-0 shadow-sm task-card" style="cursor: pointer;" onclick="openSOPDetail(${s.id})">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <h6 class="fw-bold text-primary mb-0"><i class="bi bi-file-earmark-text me-1"></i>${highlightedTitle}</h6>
+                                <button class="btn btn-sm text-danger p-0 border-0" onclick="event.stopPropagation(); deleteSOP(${s.id})">
+                                    <i class="bi bi-trash3"></i>
+                                </button>
+                            </div>
+                            <p class="small text-muted mb-0 text-truncate-custom" style="white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;">${highlightedContent}</p>
+                            ${s.images && s.images.length > 0 ? `<div class="mt-2"><i class="bi bi-image text-info me-1"></i><small class="text-muted">${s.images.length} 張圖片</small></div>` : ''}
+                            <div class="text-end mt-2">
+                                <small class="text-primary" style="font-size: 0.75rem;">點擊展開全文 <i class="bi bi-arrows-fullscreen ms-1"></i></small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;}).join('');
+        }
+
+        // 儲存任務到 localStorage
+        function saveTasks(tasks) {
+            localStorage.setItem('tasks', JSON.stringify(tasks));
+        }
+
+        function renderTasks(tasks) {
+            const query = document.getElementById('taskSearch')?.value.toLowerCase() || '';
+            const startDate = document.getElementById('startDate')?.value || '';
+            const endDate = document.getElementById('endDate')?.value || '';
+            const keywords = query.split(/\s+/).filter(k => k.trim()); // 拆分多個關鍵字
+
+            const filtered = tasks.filter(t => {
+                const combinedText = (t.topic + ' ' + (t.content || '') + ' ' + (t.notes || '')).toLowerCase();
+                const matchesKeywords = keywords.every(kw => combinedText.includes(kw));
+                
+                let matchesDate = true;
+                if (startDate && t.date && t.date < startDate) matchesDate = false;
+                if (endDate && t.date && t.date > endDate) matchesDate = false;
+                
+                return matchesKeywords && matchesDate;
+            });
+            
+            // 先排序
+            const sortedTasks = filtered.sort((a, b) => {
+                // 1. 比較完成狀態：未完成的排在前面 (false < true)
+                if (a.completed !== b.completed) {
+                    return a.completed ? 1 : -1;
+                }
+                // 2. 比較日期：依日期先後順序排序
+                const dateA = a.date || '';
+                const dateB = b.date || '';
+                if (dateA !== dateB) return dateA.localeCompare(dateB);
+                // 3. 比較時間：同一天則依時間早晚排序
+                return a.time.localeCompare(b.time);
+            });
+
+            // 處理分頁切割
+            const totalPages = Math.ceil(sortedTasks.length / itemsPerPage) || 1;
+            if (currentPage > totalPages) currentPage = totalPages;
+            
+            const startIndex = (currentPage - 1) * itemsPerPage;
+            const paginatedTasks = sortedTasks.slice(startIndex, startIndex + itemsPerPage);
+
+            taskList.innerHTML = '';
+            paginatedTasks.forEach(task => {
+                // 判斷是否逾期
+                const now = new Date();
+                const today = now.toISOString().split('T')[0];
+                const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+
+                let isOverdue = false;
+                if (!task.completed) {
+                    if (task.recurrence_type === 'once' && task.date) {
+                        if (task.date < today || (task.date === today && task.time < currentTime)) {
+                            isOverdue = true;
+                        }
+                    } else if (task.time < currentTime) {
+                        // 針對重複性任務，若當天時間已過則視為逾期
+                        isOverdue = true;
+                    }
+                }
+
+                const highlightedTopic = highlightText(task.topic, query);
+                const highlightedContent = highlightText(task.content || '無內容', query);
+                const highlightedNotes = highlightText(task.notes || '無', query);
+
+                const div = document.createElement('div');
+                div.className = `list-group-item list-group-item-action d-flex justify-content-between align-items-center task-card ${task.completed ? 'task-done' : ''} ${isOverdue ? 'task-overdue' : ''}`;
+                
+                const typeLabels = {
+                    'once': `<i class="bi bi-calendar-event me-1"></i>一次性 (${task.date})`,
+                    'daily': `<i class="bi bi-arrow-repeat me-1"></i>每天`,
+                    'weekly': `<i class="bi bi-calendar-range me-1"></i>每週`,
+                    'monthly': `<i class="bi bi-calendar-month me-1"></i>每月`
+                };
+
+                div.innerHTML = `
+                    <div>
+                        <h6 class="mb-1 fw-bold">${highlightedTopic} <span class="badge rounded-pill ${isOverdue ? 'bg-danger' : 'bg-light text-primary border border-primary'} ms-2">${task.time}</span></h6>
+                        <small class="text-muted d-block"><i class="bi bi-info-circle me-1"></i>內容: ${highlightedContent}</small>
+                        <small class="text-muted d-block note-clickable" onclick="openTaskNote(${task.id})">
+                            <i class="bi bi-sticky me-1"></i>備註: ${highlightedNotes} 
+                            ${task.images && task.images.length > 0 ? `<i class="bi bi-image text-info ms-1"></i>` : ''}
+                            <i class="bi bi-arrows-fullscreen ms-1" style="font-size: 0.7rem;"></i>
+                        </small>
+                        <span class="badge bg-light text-dark mt-1">${typeLabels[task.recurrence_type]}</span>
+                    </div>
+                    <div>
+                        <button class="btn ${task.completed ? 'btn-success' : 'btn-outline-success'} btn-sm border-0" onclick="toggleComplete(${task.id})"><i class="bi ${task.completed ? 'bi-check-circle-fill' : 'bi-check-circle'}"></i></button>
+                        <button class="btn btn-outline-warning btn-sm border-0" onclick="prepareEdit(${task.id})" ${task.completed ? 'disabled' : ''}><i class="bi bi-pencil-square"></i></button>
+                        <button class="btn btn-outline-danger btn-sm border-0" onclick="deleteTask(${task.id})"><i class="bi bi-trash3"></i></button>
+                    </div>
+                `;
+                taskList.appendChild(div);
+            });
+
+            renderPagination(totalPages);
+            updateCalendarEvents(filtered);
+        }
+
+        function renderPagination(totalPages) {
+            const paginationEl = document.getElementById('taskPagination');
+            if (totalPages <= 1) {
+                paginationEl.innerHTML = '';
+                return;
+            }
+
+            let html = `
+                <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+                    <a class="page-link" href="#" onclick="changePage(${currentPage - 1})">上一頁</a>
+                </li>
+            `;
+
+            for (let i = 1; i <= totalPages; i++) {
+                html += `
+                    <li class="page-item ${currentPage === i ? 'active' : ''}">
+                        <a class="page-link" href="#" onclick="changePage(${i})">${i}</a>
+                    </li>
+                `;
+            }
+
+            html += `
+                <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+                    <a class="page-link" href="#" onclick="changePage(${currentPage + 1})">下一頁</a>
+                </li>
+            `;
+            paginationEl.innerHTML = html;
+        }
+
+        function changePage(page) {
+            currentPage = page;
+            renderTasks(allTasks);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function changeItemsPerPage(val) {
+            itemsPerPage = parseInt(val);
+            localStorage.setItem('itemsPerPage', itemsPerPage);
+            currentPage = 1; // 切換筆數時回到第一頁，避免邏輯錯誤
+            renderTasks(allTasks);
+        }
+
+        // 清除搜尋功能
+        function clearSearch(inputId, callback) {
+            document.getElementById(inputId).value = '';
+            currentPage = 1;
+            callback();
+        }
+
+        // 清除日期區間
+        function clearDateRange() {
+            document.getElementById('startDate').value = '';
+            document.getElementById('endDate').value = '';
+            currentPage = 1;
+            renderTasks(allTasks);
+        }
+
+        // 文字高亮處理
+        function highlightText(text, query) {
+            if (!query || !text) return text;
+            const keywords = query.split(/\s+/).filter(k => k.trim());
+            if (keywords.length === 0) return text;
+            // 逸出 RegExp 特殊字元避免程式出錯
+            const escapedKeywords = keywords.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+            const regex = new RegExp(`(${escapedKeywords.join('|')})`, 'gi');
+            return text.replace(regex, '<mark>$1</mark>');
+        }
+
+        function updateCalendarEvents(tasks) {
+            if (!calendar) return;
+            
+            // 使用 batchRendering 批次處理，避免渲染過程中的閃爍或消失
+            calendar.batchRendering(() => {
+                // 清除現有的所有事件來源
+                calendar.getEventSources().forEach(source => source.remove());
+
+                const events = tasks.map(task => {
+                    const taskDate = task.date || new Date().toISOString().split('T')[0];
+                    
+                    // 判斷是否逾期 (邏輯與清單檢視一致)
+                    const now = new Date();
+                    const today = now.toISOString().split('T')[0];
+                    const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+
+                    let isOverdue = false;
+                    if (!task.completed) {
+                        if (task.recurrence_type === 'once' && task.date) {
+                            if (task.date < today || (task.date === today && task.time < currentTime)) {
+                                isOverdue = true;
+                            }
+                        } else if (task.time < currentTime) {
+                            isOverdue = true;
+                        }
+                    }
+                    
+                    const baseEvent = {
+                        id: String(task.id),
+                        // 將時間與主題合併，並在月曆標題顯示備註
+                        title: `${task.time} ${task.topic}${task.notes ? ' [' + task.notes + ']' : ''}`,
+                        extendedProps: { ...task }
+                    };
+                
+                // 1. 無論是否完成，都必須設定時間與重複規則，月曆才能正確定位
+                if (task.recurrence_type === 'once') {
+                    baseEvent.start = taskDate;
+                } else if (task.recurrence_type === 'daily') {
+                    baseEvent.daysOfWeek = [0, 1, 2, 3, 4, 5, 6];
+                } else if (task.recurrence_type === 'weekly') {
+                    const day = new Date(taskDate).getDay();
+                    baseEvent.daysOfWeek = [day];
+                } else if (task.recurrence_type === 'monthly') {
+                    baseEvent.startRecur = taskDate;
+                }
+
+                // 2. 根據完成狀態設定顏色
+                if (task.completed) {
+                    baseEvent.backgroundColor = '#adb5bd'; // 已完成統一灰色
+                    baseEvent.borderColor = '#adb5bd';
+                } else if (isOverdue) {
+                    baseEvent.backgroundColor = '#dc3545'; // 逾期統一紅色
+                    baseEvent.borderColor = '#dc3545';
+                } else {
+                    const colors = { 'once': '#667eea', 'daily': '#28a745', 'weekly': '#fd7e14', 'monthly': '#6f42c1' };
+                    const themeColor = colors[task.recurrence_type] || '#667eea';
+                    baseEvent.backgroundColor = themeColor;
+                    baseEvent.borderColor = themeColor;
+                }
+                    return baseEvent;
+                });
+
+                calendar.addEventSource(events);
+            });
+        }
+
+        // 新增任務
+        taskForm.onsubmit = async (e) => {
+            e.preventDefault();
+            const id = document.getElementById('taskId').value; // 修改模式會有 ID
+            const data = {
+                topic: document.getElementById('topic').value,
+                content: document.getElementById('content').value,
+                notes: document.getElementById('notes').value,
+                recurrence_type: document.getElementById('recurrenceType').value,
+                date: document.getElementById('date').value,
+                time: document.getElementById('time').value,
+                recurrence_detail: "" // 簡化版，可再擴充
+            };
+
+            if (id) {
+                // 修改邏輯
+                const index = allTasks.findIndex(t => t.id == id);
+                allTasks[index] = { ...allTasks[index], ...data }; // 保留原本的 completed 狀態
+            } else {
+                // 新增邏輯
+                data.id = Date.now(); // 使用時間戳記當作臨時 ID
+                data.completed = false; // 新任務預設未完成
+                allTasks.push(data);
+            }
+            
+            saveTasks(allTasks);
+            cancelEdit();
+            fetchTasks();
+        };
+
+        // 準備編輯：將資料填入表單
+        function prepareEdit(id) {
+            const task = allTasks.find(t => t.id === id);
+            if (!task) return;
+
+            document.getElementById('taskId').value = task.id;
+            document.getElementById('topic').value = task.topic;
+            document.getElementById('content').value = task.content || '';
+            document.getElementById('notes').value = task.notes || '';
+            document.getElementById('recurrenceType').value = task.recurrence_type;
+            document.getElementById('date').value = task.date || '';
+            document.getElementById('time').value = task.time;
+
+            document.getElementById('formTitle').innerText = '📝 修改任務';
+            document.getElementById('submitBtn').innerText = '更新任務';
+            document.getElementById('cancelBtn').classList.remove('d-none');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        // 取消編輯：重置表單
+        function cancelEdit() {
+            taskForm.reset();
+            document.getElementById('taskId').value = '';
+            document.getElementById('formTitle').innerText = '新增任務';
+            document.getElementById('submitBtn').innerText = '新增';
+            document.getElementById('cancelBtn').classList.add('d-none');
+        }
+
+        // 切換完成狀態
+        function toggleComplete(id) {
+            const index = allTasks.findIndex(t => t.id === id);
+            if (index !== -1) {
+                allTasks[index].completed = !allTasks[index].completed;
+                saveTasks(allTasks);
+                fetchTasks();
+            }
+        }
+
+        // 刪除任務
+        async function deleteTask(id) {
+            if (!confirm('確定要刪除嗎?')) return;
+            allTasks = allTasks.filter(t => t.id !== id);
+            saveTasks(allTasks);
+            fetchTasks();
+        }
+    </script>
+</body>
+</html>
